@@ -130,6 +130,7 @@
 .canvas-wrapper {
   flex: 1;
   overflow: hidden;
+  overflow: auto;
   padding: 1.5rem;
   background: linear-gradient(135deg, #e2e8f0 25%, transparent 25%) -8px 0/16px 16px,
     linear-gradient(225deg, #e2e8f0 25%, transparent 25%) -8px 0/16px 16px,
@@ -141,7 +142,6 @@
   cursor: grabbing;
   user-select: none;
 }
-
 .canvas-surface {
   position: relative;
   background: #ffffff;

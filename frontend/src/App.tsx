@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Rnd } from 'react-rnd'
 import './App.css'
 
@@ -124,7 +125,6 @@ function App() {
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [isPanning, setIsPanning] = useState(false)
   const panStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 })
-
   const activePaper = paperSize ? PAPER_SIZES[paperSize] : null
   const pageSizePx = useMemo(() => {
     if (!activePaper) return { width: 0, height: 0 }
@@ -392,6 +392,15 @@ function App() {
                   transformOrigin: 'top left',
                 }}
                 onMouseDown={handleCanvasMouseDown}
+            <div className="canvas-wrapper">
+              <div
+                className="canvas-surface"
+                style={{
+                  width: pageSizePx.width,
+                  height: pageSizePx.height,
+                  transform: `scale(${zoom})`,
+                  transformOrigin: 'top left',
+                }}
               >
                 {items.map((item) => {
                   if (item.type === 'line') {
@@ -416,6 +425,21 @@ function App() {
                         }}
                         onResizeStop={(_, __, ref, ___, position) => {
                           applyLineResize(item, ref.offsetWidth, ref.offsetHeight, position)
+                        enableResizing={
+                          item.orientation === 'horizontal'
+                            ? { left: true, right: true }
+                            : { top: true, bottom: true }
+                        }
+                        onDragStop={(_, data) => {
+                          handleItemUpdate(item.id, { x: data.x, y: data.y })
+                        }}
+                        onResizeStop={(_, __, ref, ___, position) => {
+                          handleItemUpdate(item.id, {
+                            width: ref.offsetWidth,
+                            height: ref.offsetHeight,
+                            x: position.x,
+                            y: position.y,
+                          })
                         }}
                         onMouseDown={() => setSelectedId(item.id)}
                         className={`canvas-item ${selectedId === item.id ? 'selected' : ''}`}
@@ -464,6 +488,7 @@ function App() {
                           }}
                         >
                           <span>{injectDbPlaceholders(item.text)}</span>
+                          <span>{item.text}</span>
                         </div>
                       )}
                       {item.type === 'data' && (
@@ -911,6 +936,12 @@ function App() {
                                   ? currentLength
                                   : currentThickness,
                               thickness: Math.max(currentThickness, 1),
+                                  ? Math.max(selectedItem.width, 120)
+                                  : selectedItem.thickness,
+                              height:
+                                orientation === 'vertical'
+                                  ? Math.max(selectedItem.height, 120)
+                                  : selectedItem.thickness,
                             })
                           }}
                         >
@@ -973,6 +1004,7 @@ function App() {
                     }}
                   >
                     <span>{injectDbPlaceholders(item.text)}</span>
+                    <span>{item.text}</span>
                   </div>
                 )
               }

@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMemo, useState } from 'react'
 import { Rnd } from 'react-rnd'
 import './App.css'
@@ -94,6 +95,19 @@ const generateId = () =>
     : Math.random().toString(36).slice(2)
 
 const dbColumns = Object.keys(DB_SAMPLE) as (keyof DbRecord)[]
+
+const isDbColumn = (value: string): value is keyof DbRecord =>
+  (dbColumns as string[]).includes(value)
+
+const injectDbPlaceholders = (text: string) =>
+  text.replace(/\{([^{}]+)\}/g, (_, rawKey: string) => {
+    const key = rawKey.trim()
+    if (isDbColumn(key)) {
+      const recordValue = DB_SAMPLE[key]
+      return recordValue !== undefined && recordValue !== null ? String(recordValue) : ''
+    }
+    return `{${rawKey}}`
+  })
 const justifyMap = {
   left: 'flex-start',
   center: 'center',
@@ -108,7 +122,9 @@ function App() {
   const [items, setItems] = useState<CanvasItem[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [zoom, setZoom] = useState(1)
-
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [isPanning, setIsPanning] = useState(false)
+  const panStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 })
   const activePaper = paperSize ? PAPER_SIZES[paperSize] : null
   const pageSizePx = useMemo(() => {
     if (!activePaper) return { width: 0, height: 0 }
@@ -119,6 +135,45 @@ function App() {
   }, [activePaper])
 
   const selectedItem = items.find((item) => item.id === selectedId) || null
+
+  useEffect(() => {
+    if (!isPanning) return
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const deltaX = event.clientX - panStartRef.current.x
+      const deltaY = event.clientY - panStartRef.current.y
+      setPan({
+        x: panStartRef.current.panX + deltaX,
+        y: panStartRef.current.panY + deltaY,
+      })
+    }
+
+    const handleMouseUp = () => {
+      setIsPanning(false)
+    }
+
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [isPanning])
+
+  const handleCanvasMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return
+    if (event.target !== event.currentTarget) return
+
+    setIsPanning(true)
+    panStartRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      panX: pan.x,
+      panY: pan.y,
+    }
+    event.preventDefault()
+  }
 
   // アイテムを新規追加
   const handleAddItem = (type: CanvasItemType) => {
@@ -197,6 +252,24 @@ function App() {
     )
   }
 
+  const applyLineResize = (
+    target: LineItem,
+    nextWidth: number,
+    nextHeight: number,
+    position: { x: number; y: number },
+  ) => {
+    const rawThickness = target.orientation === 'horizontal' ? nextHeight : nextWidth
+    const thickness = Math.max(rawThickness, 1)
+
+    handleItemUpdate(target.id, {
+      width: target.orientation === 'horizontal' ? nextWidth : thickness,
+      height: target.orientation === 'horizontal' ? thickness : nextHeight,
+      x: position.x,
+      y: position.y,
+      thickness,
+    })
+  }
+
   const handleDelete = (id: string) => {
     setItems((prev) => prev.filter((item) => item.id !== id))
     setSelectedId((prev) => (prev === id ? null : prev))
@@ -236,6 +309,8 @@ function App() {
   const resetDocument = () => {
     setItems([])
     setSelectedId(null)
+    setPan({ x: 0, y: 0 })
+    setIsPanning(false)
   }
 
   return (
@@ -266,6 +341,8 @@ function App() {
                 setTimeout(() => {
                   setItems([])
                   setSelectedId(null)
+                  setPan({ x: 0, y: 0 })
+                  setIsPanning(false)
                 }, 0)
               }}
             >
@@ -305,6 +382,16 @@ function App() {
                 <button onClick={() => setZoom((prev) => Math.min(2, prev + 0.1))}>+</button>
               </div>
             </div>
+            <div className={`canvas-wrapper ${isPanning ? 'panning' : ''}`}>
+              <div
+                className={`canvas-surface ${isPanning ? 'is-panning' : ''}`}
+                style={{
+                  width: pageSizePx.width,
+                  height: pageSizePx.height,
+                  transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                  transformOrigin: 'top left',
+                }}
+                onMouseDown={handleCanvasMouseDown}
             <div className="canvas-wrapper">
               <div
                 className="canvas-surface"
@@ -324,6 +411,20 @@ function App() {
                         size={{ width: item.width, height: item.height }}
                         position={{ x: item.x, y: item.y }}
                         scale={zoom}
+                        enableResizing={{
+                          top: true,
+                          right: true,
+                          bottom: true,
+                          left: true,
+                        }}
+                        onDragStop={(_, data) => {
+                          handleItemUpdate(item.id, { x: data.x, y: data.y })
+                        }}
+                        onResize={(_, __, ref, ___, position) => {
+                          applyLineResize(item, ref.offsetWidth, ref.offsetHeight, position)
+                        }}
+                        onResizeStop={(_, __, ref, ___, position) => {
+                          applyLineResize(item, ref.offsetWidth, ref.offsetHeight, position)
                         enableResizing={
                           item.orientation === 'horizontal'
                             ? { left: true, right: true }
@@ -386,6 +487,7 @@ function App() {
                             justifyContent: alignToJustify(item.align),
                           }}
                         >
+                          <span>{injectDbPlaceholders(item.text)}</span>
                           <span>{item.text}</span>
                         </div>
                       )}
@@ -815,10 +917,25 @@ function App() {
                           value={selectedItem.orientation}
                           onChange={(event) => {
                             const orientation = event.target.value as LineItem['orientation']
+                            const currentLength =
+                              selectedItem.orientation === 'horizontal'
+                                ? selectedItem.width
+                                : selectedItem.height
+                            const currentThickness =
+                              selectedItem.orientation === 'horizontal'
+                                ? selectedItem.height
+                                : selectedItem.width
                             handleItemUpdate(selectedItem.id, {
                               orientation,
                               width:
                                 orientation === 'horizontal'
+                                  ? currentLength
+                                  : currentThickness,
+                              height:
+                                orientation === 'vertical'
+                                  ? currentLength
+                                  : currentThickness,
+                              thickness: Math.max(currentThickness, 1),
                                   ? Math.max(selectedItem.width, 120)
                                   : selectedItem.thickness,
                               height:
@@ -886,6 +1003,7 @@ function App() {
                       justifyContent: alignToJustify(item.align),
                     }}
                   >
+                    <span>{injectDbPlaceholders(item.text)}</span>
                     <span>{item.text}</span>
                   </div>
                 )
